@@ -122,6 +122,10 @@ def generar_pdf(datos):
         ["Temperatura salida caliente", f"{datos['Tho']:.2f} °C"],
         ["Temperatura entrada fria", f"{datos['Tci']:.2f} °C"],
         ["Temperatura salida fria", f"{datos['Tco']:.2f} °C"],
+        ["Fluido caliente seleccionado", datos["fluido_caliente"]],
+        ["Fluido frio seleccionado", datos["fluido_frio"]],
+        ["Material del tubo interior", datos["material"]],
+        ["Conductividad de pared", f"{datos['kw']:.2f} W/m K"],
         ["Diametro interior", f"{datos['Di']:.4f} m"],
         ["Diametro exterior tubo interno", f"{datos['Do']:.4f} m"],
         ["Diametro tubo exterior", f"{datos['D2']:.4f} m"],
@@ -206,7 +210,6 @@ def generar_pdf(datos):
 
     return memoria.getvalue()
 
-
 # =====================================================
 # CONFIGURACION
 # =====================================================
@@ -258,6 +261,27 @@ h1, h2, h3 {
     color: #c5d5e8;
     font-size: 12px;
 }
+.length-card {
+    background: linear-gradient(135deg,#123d5c,#10243a);
+    border: 2px solid #35b9ff;
+    border-radius: 12px;
+    padding: 12px 16px;
+    text-align: center;
+    min-height: 92px;
+}
+.length-label {
+    color: #b7d9f2;
+    font-size: 13px;
+}
+.length-value {
+    color: #35b9ff;
+    font-size: 30px;
+    font-weight: 800;
+}
+.length-unit {
+    color: #d5e7f7;
+    font-size: 12px;
+}
 .section {
     color: #35b9ff;
     font-weight: bold;
@@ -280,6 +304,12 @@ st.caption(
     "THERMAL DESIGN | HYDRAULIC ANALYSIS | PERFORMANCE"
 )
 
+st.caption(
+    f"Fluido caliente: {st.session_state.get('fluido_caliente', 'Agua')}  ·  "
+    f"Fluido frío: {st.session_state.get('fluido_frio', 'Agua')}  ·  "
+    f"Material: {st.session_state.get('material_pared', 'Acero inoxidable')}"
+)
+
 
 # =====================================================
 # ENTRADAS
@@ -287,109 +317,158 @@ st.caption(
 
 st.sidebar.title("⚙️ Datos de operación")
 
+# Valores iniciales para los controles. Las propiedades se pueden editar.
+st.session_state.setdefault("fluido_caliente", "Agua")
+st.session_state.setdefault("fluido_frio", "Agua")
+st.session_state.setdefault("material_pared", "Acero inoxidable")
+
+for clave, valor in {
+    "mh": 0.50, "Thi": 90.0, "Tho": 60.0, "cp_h": 4180.0,
+    "mc": 0.60, "Tci": 20.0, "cp_c": 4180.0,
+    "Di": 0.020, "Do": 0.025, "D2": 0.050, "kw": 16.0,
+    "rho_h": 995.0, "rho_c": 995.0,
+    "mu_h": 0.0008, "mu_c": 0.0008,
+    "k_h": 0.62, "k_c": 0.62
+}.items():
+    st.session_state.setdefault(clave, valor)
+
+
+def actualizar_propiedades_fluido(lado):
+    """Carga las propiedades de referencia del fluido elegido."""
+    nombre_widget = "fluido_caliente" if lado == "h" else "fluido_frio"
+    propiedades = cal.obtener_propiedades_fluido(
+        st.session_state[nombre_widget]
+    )
+    st.session_state[f"cp_{lado}"] = float(propiedades["cp"])
+    st.session_state[f"rho_{lado}"] = float(propiedades["rho"])
+    st.session_state[f"mu_{lado}"] = float(propiedades["mu"])
+    st.session_state[f"k_{lado}"] = float(propiedades["k"])
+
+
+def actualizar_material():
+    """Actualiza la conductividad de pared según el material elegido."""
+    st.session_state["kw"] = float(
+        cal.obtener_conductividad_material(
+            st.session_state["material_pared"]
+        )
+    )
+
+
 st.sidebar.subheader("Fluido caliente")
 
+st.sidebar.selectbox(
+    "Tipo de fluido caliente",
+    options=list(cal.FLUIDOS.keys()),
+    key="fluido_caliente",
+    on_change=actualizar_propiedades_fluido,
+    args=("h",),
+    help="Selecciona el fluido que circula por el tubo interior."
+)
+
 mh = st.sidebar.number_input(
-    "Caudal caliente (kg/s)",
-    min_value=0.01,
-    value=0.50
+    "Caudal caliente (kg/s)", min_value=0.01, key="mh",
+    help="Masa de fluido caliente que circula por segundo."
 )
-
 Thi = st.sidebar.number_input(
-    "Temperatura entrada caliente (°C)",
-    value=90.0
+    "Temperatura entrada caliente (°C)", key="Thi",
+    help="Temperatura del fluido caliente al entrar al intercambiador."
 )
-
 Tho = st.sidebar.number_input(
-    "Temperatura salida caliente (°C)",
-    value=60.0
+    "Temperatura salida caliente (°C)", key="Tho",
+    help="Temperatura deseada o medida del fluido caliente a la salida."
 )
-
 Cph = st.sidebar.number_input(
-    "Calor específico caliente (J/kg·K)",
-    value=4180.0
+    "Calor específico caliente (J/kg·K)", key="cp_h",
+    help="Energía necesaria para elevar 1 K la temperatura de 1 kg de fluido."
 )
 
 st.sidebar.divider()
 st.sidebar.subheader("Fluido frío")
 
+st.sidebar.selectbox(
+    "Tipo de fluido frío",
+    options=list(cal.FLUIDOS.keys()),
+    key="fluido_frio",
+    on_change=actualizar_propiedades_fluido,
+    args=("c",),
+    help="Selecciona el fluido que circula por el espacio anular."
+)
+
 mc = st.sidebar.number_input(
-    "Caudal frío (kg/s)",
-    min_value=0.01,
-    value=0.60
+    "Caudal frío (kg/s)", min_value=0.01, key="mc",
+    help="Masa de fluido frío que circula por segundo."
 )
-
 Tci = st.sidebar.number_input(
-    "Temperatura entrada fría (°C)",
-    value=20.0
+    "Temperatura entrada fría (°C)", key="Tci",
+    help="Temperatura del fluido frío antes de recibir calor."
 )
-
 Cpc = st.sidebar.number_input(
-    "Calor específico frío (J/kg·K)",
-    value=4180.0
+    "Calor específico frío (J/kg·K)", key="cp_c",
+    help="Energía necesaria para elevar 1 K la temperatura de 1 kg de fluido."
 )
 
 st.sidebar.divider()
 st.sidebar.subheader("Geometría")
 
 Di = st.sidebar.number_input(
-    "Diámetro interior (m)",
-    value=0.020,
-    format="%.4f"
+    "Diámetro interior (m)", key="Di", format="%.4f",
+    help="Diámetro interno del tubo por donde circula el fluido caliente."
 )
-
 Do = st.sidebar.number_input(
-    "Diámetro exterior tubo interno (m)",
-    value=0.025,
-    format="%.4f"
+    "Diámetro exterior tubo interno (m)", key="Do", format="%.4f",
+    help="Diámetro externo del tubo interior; define el área de transferencia."
 )
-
 D2 = st.sidebar.number_input(
-    "Diámetro interior tubo exterior (m)",
-    value=0.050,
-    format="%.4f"
+    "Diámetro interior tubo exterior (m)", key="D2", format="%.4f",
+    help="Diámetro interno del tubo exterior que contiene el espacio anular."
 )
 
+st.sidebar.divider()
+st.sidebar.subheader("Material de la pared")
+
+st.sidebar.selectbox(
+    "Material del tubo interior",
+    options=list(cal.MATERIALES.keys()),
+    key="material_pared",
+    on_change=actualizar_material,
+    help="El material seleccionado determina la conductividad térmica de la pared."
+)
 kw = st.sidebar.number_input(
-    "Conductividad pared (W/m·K)",
-    value=16.0
+    "Conductividad de pared (W/m·K)", key="kw",
+    help="Conductividad térmica del material. Se actualiza con el material, pero puedes editarla."
 )
 
 st.sidebar.divider()
 st.sidebar.subheader("Propiedades de los fluidos")
+st.sidebar.caption(
+    "Valores de referencia aproximados. Verifica la temperatura y composición; "
+    "puedes ajustar cada propiedad manualmente."
+)
 
 rho_h = st.sidebar.number_input(
-    "Densidad caliente (kg/m³)",
-    value=995.0
+    "Densidad caliente (kg/m³)", key="rho_h",
+    help="Masa por unidad de volumen del fluido caliente."
 )
-
 rho_c = st.sidebar.number_input(
-    "Densidad fría (kg/m³)",
-    value=995.0
+    "Densidad fría (kg/m³)", key="rho_c",
+    help="Masa por unidad de volumen del fluido frío."
 )
-
 mu_h = st.sidebar.number_input(
-    "Viscosidad caliente (Pa·s)",
-    value=0.0008,
-    format="%.5f"
+    "Viscosidad caliente (Pa·s)", key="mu_h", format="%.6f",
+    help="Resistencia del fluido caliente a fluir."
 )
-
 mu_c = st.sidebar.number_input(
-    "Viscosidad fría (Pa·s)",
-    value=0.0008,
-    format="%.5f"
+    "Viscosidad fría (Pa·s)", key="mu_c", format="%.6f",
+    help="Resistencia del fluido frío a fluir."
 )
-
 k_h = st.sidebar.number_input(
-    "Conductividad caliente (W/m·K)",
-    value=0.62
+    "Conductividad caliente (W/m·K)", key="k_h",
+    help="Capacidad del fluido caliente para conducir energía térmica."
 )
-
 k_c = st.sidebar.number_input(
-    "Conductividad fría (W/m·K)",
-    value=0.62
+    "Conductividad fría (W/m·K)", key="k_c",
+    help="Capacidad del fluido frío para conducir energía térmica."
 )
-
 
 # =====================================================
 # CALCULOS
@@ -445,13 +524,9 @@ try:
         Cpc, mu_c, k_c
     )
 
-    Nuh = cal.dittus_boelter(
-        Reh, Prh, 0.3
-    )
+    Nuh = cal.numero_nusselt(Reh, Prh)
 
-    Nuc = cal.dittus_boelter(
-        Rec, Prc, 0.4
-    )
+    Nuc = cal.numero_nusselt(Rec, Prc)
 
     hi = Nuh * k_h / Di
     ho = Nuc * k_c / Dh
@@ -524,7 +599,6 @@ for col, label, value, unit in metricas:
         <div class="metric-unit">{unit}</div>
         </div>
         """, unsafe_allow_html=True)
-
 
 # =====================================================
 # DIAGRAMA Y GRAFICA
@@ -664,9 +738,20 @@ st.markdown(
 d1, d2, d3 = st.columns(3)
 
 d1.metric("Área requerida", f"{A:.3f} m²")
-d2.metric("Longitud estimada", f"{L:.2f} m")
+with d2:
+    st.markdown(f"""
+    <div class="length-card">
+        <div class="length-label">LONGITUD ESTIMADA</div>
+        <div class="length-value">{L:.2f}</div>
+        <div class="length-unit">metros · longitud preliminar del tubo</div>
+    </div>
+    """, unsafe_allow_html=True)
 d3.metric("Diámetro hidráulico anular", f"{Dh:.4f} m")
 
+st.caption(
+    "La longitud estimada se calcula a partir del área exterior requerida "
+    "y del diámetro exterior del tubo interior. Es un resultado preliminar."
+)
 
 # =====================================================
 # PRESION Y BOMBEO
@@ -722,6 +807,10 @@ st.write(
 )
 
 datos_informe = {
+    "fluido_caliente": st.session_state["fluido_caliente"],
+    "fluido_frio": st.session_state["fluido_frio"],
+    "material": st.session_state["material_pared"],
+    "kw": kw,
     "mh": mh,
     "mc": mc,
     "Thi": Thi,
@@ -784,7 +873,6 @@ st.info(
 )
 
 st.caption(
-    "HEAT EXCHANGERS JR · Versión 0.4 · "
+    "HEAT EXCHANGERS JR · Versión 0.5 · "
     "Simulador térmico e hidráulico."
 )
-
